@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Senior Labelers Tracker — Real-time productivity dashboard for annotation teams" />
+  <meta name="theme-color" content="#0F1117" />
+  <title>Senior Labelers Tracker</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       LOADING OVERLAY (global)
+       ═══════════════════════════════════════════════════════════════ -->
+  <div class="loading-overlay" id="loading-overlay" role="status" aria-live="polite">
+    <div class="loader-card">
+      <div class="loader-spinner"></div>
+      <p id="loading-message">Loading data…</p>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       TOAST CONTAINER
+       ═══════════════════════════════════════════════════════════════ -->
+  <div class="toast-container" id="toast-container" aria-live="polite"></div>
+
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       SCREEN 1: LOGIN
+       ═══════════════════════════════════════════════════════════════ -->
+  <div id="login-screen" role="main">
+    <div class="login-card">
+
+      <div class="login-logo">
+        <div class="logo-icon" aria-hidden="true">🏷️</div>
+        <h1>Senior Labelers Tracker</h1>
+        <p>Productivity Dashboard · METI</p>
+      </div>
+
+      <div>
+        <div class="form-group">
+          <label for="input-name">Your Name</label>
+          <input
+            type="text"
+            id="input-name"
+            autocomplete="name"
+            placeholder="e.g. Mostafa Fayez"
+            aria-required="true"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="input-pass">Password</label>
+          <input
+            type="password"
+            id="input-pass"
+            autocomplete="current-password"
+            placeholder="Enter your password"
+            aria-required="true"
+          />
+        </div>
+
+        <button class="btn-login" id="btn-login" type="button">
+          <span class="btn-text">Log In</span>
+          <span class="btn-spinner">
+            <span class="spinner"></span>
+          </span>
+        </button>
+
+        <div class="login-error" id="login-error" role="alert"></div>
+        <div class="login-lockout" id="login-lockout" role="alert"></div>
+      </div>
+
+      <div class="login-footer">
+        Version 1.0.0 · Powered by METI
+      </div>
+
+    </div>
+  </div>
+
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       SCREEN 2: DASHBOARD
+       ═══════════════════════════════════════════════════════════════ -->
+  <div id="dashboard-screen" role="main" aria-label="Dashboard">
+
+    <!-- TOP NAV -->
+    <nav class="top-nav" aria-label="Main navigation">
+      <div class="nav-brand">
+        <div class="brand-icon" aria-hidden="true">🏷️</div>
+        <h2>Senior Labelers Tracker</h2>
+      </div>
+
+      <div class="nav-right">
+        <div class="user-badge" id="user-badge">
+          <div class="user-avatar" id="user-avatar">M</div>
+          <span class="user-name-nav" id="user-name-nav">User</span>
+        </div>
+        <button class="btn-logout" id="btn-logout" type="button" aria-label="Log out">
+          <span>↩</span>
+          <span>Logout</span>
+        </button>
+      </div>
+    </nav>
+
+    <!-- MAIN CONTENT -->
+    <main class="dashboard-main">
+
+      <!-- Date Toolbar -->
+      <div class="date-toolbar">
+        <div class="date-toolbar-left">
+          <h3 id="dashboard-greeting">Good morning!</h3>
+          <p id="dashboard-subtitle">Loading your tasks…</p>
+        </div>
+        <div class="date-toolbar-right">
+          <select class="date-select" id="date-select" aria-label="Select date">
+            <option value="">Loading dates…</option>
+          </select>
+          <div class="sync-badge" title="Last sync time" id="sync-badge">
+            <div class="sync-dot"></div>
+            <span id="last-sync-text">Syncing…</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Summary Cards -->
+      <div class="summary-cards" role="region" aria-label="Summary statistics">
+
+        <div class="summary-card card-total" role="article">
+          <div class="card-header">
+            <span class="card-label">Total Submissions</span>
+            <span class="card-icon" aria-hidden="true">📊</span>
+          </div>
+          <div class="card-value" id="card-total">0</div>
+          <div class="card-sub">Tasks today</div>
+        </div>
+
+        <div class="summary-card card-support" role="article">
+          <div class="card-header">
+            <span class="card-label">Support Tasks</span>
+            <span class="card-icon" aria-hidden="true">🤝</span>
+          </div>
+          <div class="card-value" id="card-support">0</div>
+          <div class="card-sub">For other teams</div>
+        </div>
+
+        <div class="summary-card card-own" role="article">
+          <div class="card-header">
+            <span class="card-label">Own Tasks</span>
+            <span class="card-icon" aria-hidden="true">👤</span>
+          </div>
+          <div class="card-value" id="card-own">0</div>
+          <div class="card-sub">Personal submissions</div>
+        </div>
+
+        <div class="summary-card card-objects" role="article">
+          <div class="card-header">
+            <span class="card-label">Objects Annotated</span>
+            <span class="card-icon" aria-hidden="true">🎯</span>
+          </div>
+          <div class="card-value" id="card-objects">0</div>
+          <div class="card-sub">Total objects</div>
+        </div>
+
+      </div>
+
+      <!-- Panels Row -->
+      <div class="panels" role="region" aria-label="Task breakdown">
+
+        <!-- Support Activity Panel -->
+        <div class="panel-card">
+          <div class="panel-header">
+            <span class="panel-header-icon" aria-hidden="true">🤝</span>
+            <h3>Support Activity</h3>
+            <span class="panel-count-badge" id="support-count-badge">0 teams</span>
+          </div>
+          <div class="panel-body" id="support-panel-body">
+            <div class="empty-state">
+              <div class="empty-icon">🤝</div>
+              <p>No support tasks for this date</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Own Tasks Panel -->
+        <div class="panel-card">
+          <div class="panel-header">
+            <span class="panel-header-icon" aria-hidden="true">👤</span>
+            <h3>Own Tasks</h3>
+            <span class="panel-count-badge" id="own-count-badge">0 tasks</span>
+          </div>
+          <div class="panel-body" id="own-panel-body">
+            <div class="empty-state">
+              <div class="empty-icon">📋</div>
+              <p>No tasks submitted today</p>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Detailed Task Table -->
+      <section class="task-table-section" aria-label="Detailed task list">
+
+        <div class="table-toolbar">
+          <div class="table-toolbar-title">
+            <span aria-hidden="true">📋</span>
+            <h3>Detailed Task List</h3>
+          </div>
+          <div class="table-filters">
+            <select class="filter-select" id="filter-modality" aria-label="Filter by modality">
+              <option value="">All Modalities</option>
+              <option value="Lane Line">Lane Line</option>
+              <option value="LIDAR">LIDAR</option>
+            </select>
+            <select class="filter-select" id="filter-pass" aria-label="Filter by pass type">
+              <option value="">All Pass Types</option>
+              <option value="FP">First Pass (FP)</option>
+              <option value="QA">Quality Check (QA)</option>
+            </select>
+            <select class="filter-select" id="filter-mode" aria-label="Filter by task mode">
+              <option value="">All Tasks</option>
+              <option value="OWN">Own Tasks</option>
+              <option value="SUPPORT">Support Tasks</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table role="table" aria-label="Task details">
+            <thead>
+              <tr>
+                <th data-sort="idx">#<span class="sort-icon">↕</span></th>
+                <th data-sort="timestamp">Timestamp<span class="sort-icon">↕</span></th>
+                <th data-sort="mode">Mode<span class="sort-icon">↕</span></th>
+                <th data-sort="modality">Modality<span class="sort-icon">↕</span></th>
+                <th data-sort="pass">Pass<span class="sort-icon">↕</span></th>
+                <th data-sort="queueName">Queue Name<span class="sort-icon">↕</span></th>
+                <th data-sort="objectCount">Objects<span class="sort-icon">↕</span></th>
+                <th>Task Link</th>
+              </tr>
+            </thead>
+            <tbody id="task-table-body">
+              <tr>
+                <td colspan="8" class="table-empty">No tasks to display</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="row-count-info" id="row-count-info">
+          Showing 0 tasks
+        </div>
+
+      </section>
+
+    </main>
+  </div><!-- /dashboard-screen -->
+
+
+  <script src="script.js"></script>
+</body>
+</html>

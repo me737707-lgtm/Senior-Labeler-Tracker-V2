@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════════════════════
    Senior Labelers Tracker — script.js
    Frontend Logic: Auth, Data Fetch, Rendering, Filtering, Sorting
-   Version: 1.0.1  (Parallel Fetch + Breakdown Fix)
+   Version: 1.1.0  (Parallel Fetch + Breakdown Fix + Instant Loading)
    ═══════════════════════════════════════════════════════════════════════════════ */
 
 'use strict';
@@ -10,11 +10,11 @@
 const CONFIG = {
   SCRIPT_URL:    'https://script.google.com/macros/s/AKfycbwsrhMUOM3gV5QxuEtjWvDPV-EsAOXazI0DxTTBwYY3Q-Q44_bdLtPAxixGQq35rVo2qg/exec',
   APP_NAME:      'Senior Labelers Tracker',
-  VERSION:       '1.0.1',
+  VERSION:       '1.1.0',
   CACHE_TTL:     60 * 1000,          // 1 minute client-side cache
   MAX_LOGIN_ATTEMPTS: 5,
   LOCKOUT_SECONDS:    30,
-  TABLE_VIRTUAL_THRESHOLD: 200,      // Virtualize if rows > this
+  TABLE_VIRTUAL_THRESHOLD: 200,
   DEBOUNCE_MS:   300,
 };
 
@@ -24,10 +24,10 @@ const CONFIG = {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const state = {
-  fullName:         null,   // stored full name: "Mostafa Fayez (M)"
-  displayName:      null,   // stripped: "Mostafa Fayez"
+  fullName:         null,
+  displayName:      null,
   currentDate:      null,
-  allTasks:         [],     // combined support + own tasks (flat)
+  allTasks:         [],
   filteredTasks:    [],
   sortColumn:       'timestamp',
   sortAsc:          false,
@@ -36,7 +36,7 @@ const state = {
   filterMode:       '',
   loginAttempts:    0,
   lockoutUntil:     null,
-  fetchCache:       {},     // key: "name|date" → {data, ts}
+  fetchCache:       {},
 };
 
 
@@ -51,14 +51,12 @@ const DOM = {
   loadingMessage:   () => document.getElementById('loading-message'),
   toastContainer:   () => document.getElementById('toast-container'),
 
-  // Login
   inputName:        () => document.getElementById('input-name'),
   inputPass:        () => document.getElementById('input-pass'),
   btnLogin:         () => document.getElementById('btn-login'),
   loginError:       () => document.getElementById('login-error'),
   loginLockout:     () => document.getElementById('login-lockout'),
 
-  // Dashboard
   btnLogout:        () => document.getElementById('btn-logout'),
   userAvatar:       () => document.getElementById('user-avatar'),
   userNameNav:      () => document.getElementById('user-name-nav'),
@@ -68,19 +66,16 @@ const DOM = {
   syncBadge:        () => document.getElementById('sync-badge'),
   lastSyncText:     () => document.getElementById('last-sync-text'),
 
-  // Summary cards
   cardTotal:        () => document.getElementById('card-total'),
   cardSupport:      () => document.getElementById('card-support'),
   cardOwn:          () => document.getElementById('card-own'),
   cardObjects:      () => document.getElementById('card-objects'),
 
-  // Panels
   supportPanelBody: () => document.getElementById('support-panel-body'),
   ownPanelBody:     () => document.getElementById('own-panel-body'),
   supportCountBadge:() => document.getElementById('support-count-badge'),
   ownCountBadge:    () => document.getElementById('own-count-badge'),
 
-  // Table
   taskTableBody:    () => document.getElementById('task-table-body'),
   filterModality:   () => document.getElementById('filter-modality'),
   filterPass:       () => document.getElementById('filter-pass'),
@@ -93,17 +88,11 @@ const DOM = {
 // UTILS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/**
- * Strip suffix like "(M)" from a name.
- */
 function stripSuffix(name) {
   if (!name) return '';
   return name.replace(/\s*\([^)]*\)\s*$/, '').trim();
 }
 
-/**
- * Format timestamp to "HH:MM AM/PM" for display.
- */
 function formatTime(ts) {
   if (!ts) return '—';
   try {
@@ -115,9 +104,6 @@ function formatTime(ts) {
   }
 }
 
-/**
- * Format a number with count-up animation.
- */
 function animateCountUp(el, targetVal, duration = 800) {
   if (!el) return;
   const start = 0;
@@ -127,7 +113,7 @@ function animateCountUp(el, targetVal, duration = 800) {
   function update(now) {
     const elapsed = now - startTime;
     const progress = Math.min(elapsed / duration, 1);
-    const eased = 1 - Math.pow(1 - progress, 3); // ease-out cubic
+    const eased = 1 - Math.pow(1 - progress, 3);
     const current = Math.round(start + (endVal - start) * eased);
     el.textContent = current.toLocaleString();
     if (progress < 1) requestAnimationFrame(update);
@@ -135,9 +121,6 @@ function animateCountUp(el, targetVal, duration = 800) {
   requestAnimationFrame(update);
 }
 
-/**
- * Today's date as YYYY-MM-DD.
- */
 function todayKey() {
   const d = new Date();
   const year  = d.getFullYear();
@@ -146,9 +129,6 @@ function todayKey() {
   return `${year}-${month}-${day}`;
 }
 
-/**
- * Greet based on time of day.
- */
 function getGreeting() {
   const h = new Date().getHours();
   if (h < 12) return 'Good morning';
@@ -156,9 +136,6 @@ function getGreeting() {
   return 'Good evening';
 }
 
-/**
- * Debounce a function.
- */
 function debounce(fn, ms) {
   let timer;
   return (...args) => {
@@ -167,9 +144,6 @@ function debounce(fn, ms) {
   };
 }
 
-/**
- * Escape HTML entities.
- */
 function escapeHtml(str) {
   return String(str)
     .replace(/&/g, '&amp;')
@@ -178,9 +152,6 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
-/**
- * Show or hide loading overlay.
- */
 function setLoading(show, message = 'Loading data…') {
   const overlay = DOM.loadingOverlay();
   const msg     = DOM.loadingMessage();
@@ -192,9 +163,6 @@ function setLoading(show, message = 'Loading data…') {
   }
 }
 
-/**
- * Show toast notification.
- */
 function showToast(message, type = 'success', duration = 3000) {
   const container = DOM.toastContainer();
   if (!container) return;
@@ -216,9 +184,6 @@ function showToast(message, type = 'success', duration = 3000) {
 // API LAYER
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/**
- * Build query string URL for Apps Script.
- */
 function buildUrl(params) {
   const qs = Object.entries(params)
     .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
@@ -226,9 +191,6 @@ function buildUrl(params) {
   return `${CONFIG.SCRIPT_URL}?${qs}`;
 }
 
-/**
- * Generic API call with error handling.
- */
 async function apiCall(params) {
   const url = buildUrl(params);
   const response = await fetch(url);
@@ -238,18 +200,11 @@ async function apiCall(params) {
   return data;
 }
 
-/**
- * Authenticate user.
- */
 async function apiAuth(name, pass) {
   return apiCall({ action: 'auth', name, pass });
 }
 
-/**
- * Fetch user's tasks for a date.
- */
 async function apiUserData(name, date) {
-  // Check cache
   const cacheKey = `${name}|${date}`;
   const cached   = state.fetchCache[cacheKey];
   if (cached && (Date.now() - cached.ts) < CONFIG.CACHE_TTL) {
@@ -257,15 +212,10 @@ async function apiUserData(name, date) {
   }
 
   const data = await apiCall({ action: 'userData', name, date });
-
-  // Store in cache
   state.fetchCache[cacheKey] = { data, ts: Date.now() };
   return data;
 }
 
-/**
- * Fetch available dates for a user.
- */
 async function apiAvailableDates(name) {
   return apiCall({ action: 'availableDates', name });
 }
@@ -275,9 +225,6 @@ async function apiAvailableDates(name) {
 // AUTH MODULE
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/**
- * Show login error message.
- */
 function showLoginError(msg) {
   const el = DOM.loginError();
   if (!el) return;
@@ -290,11 +237,7 @@ function hideLoginError() {
   if (el) el.classList.remove('show');
 }
 
-/**
- * Handle login submit.
- */
 async function handleLogin() {
-  // Check lockout
   if (state.lockoutUntil && Date.now() < state.lockoutUntil) {
     const remaining = Math.ceil((state.lockoutUntil - Date.now()) / 1000);
     showLockout(remaining);
@@ -313,7 +256,6 @@ async function handleLogin() {
     return;
   }
 
-  // Set loading state on button
   const btn = DOM.btnLogin();
   btn.disabled = true;
   btn.classList.add('loading');
@@ -326,7 +268,6 @@ async function handleLogin() {
       state.fullName    = result.fullName;
       state.displayName = stripSuffix(result.fullName);
 
-      // Store in session
       sessionStorage.setItem('slt_fullName',    state.fullName);
       sessionStorage.setItem('slt_displayName', state.displayName);
 
@@ -381,12 +322,10 @@ function startLockoutCountdown() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 async function showDashboard() {
-  // Switch screens
   DOM.loginScreen().style.display = 'none';
   const dash = DOM.dashboardScreen();
   dash.classList.add('active');
 
-  // Set user info in nav
   const initials = state.displayName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
   DOM.userAvatar().textContent   = initials;
   DOM.userNameNav().textContent  = state.displayName;
@@ -397,7 +336,6 @@ async function showDashboard() {
   try {
     const today = todayKey();
 
-    // PARALLEL FETCH: dates list + today's user data simultaneously
     const [datesResult, userDataResult] = await Promise.all([
       apiAvailableDates(state.displayName),
       apiUserData(state.displayName, today)
@@ -406,12 +344,10 @@ async function showDashboard() {
     const dates = datesResult.dates || [];
     populateDateSelect(dates);
 
-    // Default to today or first available
     const selectedDate = dates.includes(today) ? today : (dates[0] || today);
     state.currentDate = selectedDate;
     DOM.dateSelect().value = selectedDate;
 
-    // If today is the selected date, render immediately from the already-fetched data
     if (selectedDate === today) {
       renderDashboardFromData(userDataResult, selectedDate);
     } else {
@@ -419,7 +355,6 @@ async function showDashboard() {
     }
   } catch (err) {
     showToast('Failed to load data: ' + err.message, 'error');
-    // Fallback: load today anyway
     state.currentDate = todayKey();
     await loadDashboardData(state.currentDate);
   } finally {
@@ -427,9 +362,6 @@ async function showDashboard() {
   }
 }
 
-/**
- * Populate date select dropdown.
- */
 function populateDateSelect(dates) {
   const sel = DOM.dateSelect();
   sel.innerHTML = '';
@@ -450,26 +382,20 @@ function populateDateSelect(dates) {
   });
 }
 
-/**
- * Render dashboard using already-fetched data (avoids duplicate API call).
- */
 function renderDashboardFromData(result, date) {
   const supportTasks = result.supportTasks || [];
   const ownTasks     = result.ownTasks     || [];
 
-  // Tag each task with mode
   supportTasks.forEach(t => { t._mode = 'SUPPORT'; });
   ownTasks.forEach(t => { t._mode = 'OWN'; });
 
   state.allTasks = [...supportTasks, ...ownTasks];
 
-  // Update last sync
   if (result.lastSync) {
     const syncTime = new Date(result.lastSync);
     DOM.lastSyncText().textContent = 'Synced ' + syncTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
   }
 
-  // Render everything
   renderSummaryCards(supportTasks, ownTasks);
   renderSupportPanel(supportTasks);
   renderOwnPanel(ownTasks);
@@ -480,9 +406,6 @@ function renderDashboardFromData(result, date) {
     `${state.allTasks.length} task${state.allTasks.length !== 1 ? 's' : ''} on ${date}`;
 }
 
-/**
- * Load and render dashboard data for a given date.
- */
 async function loadDashboardData(date) {
   setLoading(true, 'Fetching tasks…');
   DOM.dashboardSubtitle().textContent = `Loading tasks for ${date}…`;
@@ -542,7 +465,6 @@ function renderSupportPanel(supportTasks) {
     return;
   }
 
-  // Group by team (by teamInfo.teamCode or by teamInfo.teamLead)
   const teamGroups = {};
   supportTasks.forEach(task => {
     const info = task.teamInfo;
@@ -567,7 +489,6 @@ function renderSupportPanel(supportTasks) {
 
   container.innerHTML = html;
 
-  // Attach queue toggles
   container.querySelectorAll('.queues-toggle').forEach(btn => {
     btn.addEventListener('click', () => {
       const list = btn.nextElementSibling;
@@ -582,22 +503,19 @@ function buildTeamBlock(group, idx) {
   const info  = group.info;
   const tasks = group.tasks;
 
-  // Breakdown with safe normalization — FIX for empty/whitespace/undefined values
+  // SAFE BREAKDOWN with normalization
   const breakdown = { 'Lane Line': { FP: 0, QA: 0 }, 'LIDAR': { FP: 0, QA: 0 } };
 
   tasks.forEach(t => {
     let mod  = String(t.modality || '').trim();
     let pass = String(t.pass || '').trim();
 
-    // Normalize modality: default to Lane Line if empty or unrecognized
     if (!mod || (mod.toLowerCase() !== 'lane line' && mod.toLowerCase() !== 'lidar')) {
       mod = 'Lane Line';
     }
-    // Normalize case for display consistency
     if (mod.toLowerCase() === 'lane line') mod = 'Lane Line';
     if (mod.toLowerCase() === 'lidar') mod = 'LIDAR';
 
-    // Normalize pass: default to FP, uppercase
     if (!pass) pass = 'FP';
     pass = pass.toUpperCase();
 
@@ -606,8 +524,6 @@ function buildTeamBlock(group, idx) {
     else                breakdown[mod].FP++;
   });
 
-  // Safety net: if all counts are zero but we have tasks, force them to Lane Line/FP
-  // This handles edge cases where raw data might be malformed
   const totalClassified = breakdown['Lane Line'].FP + breakdown['Lane Line'].QA + 
                           breakdown['LIDAR'].FP + breakdown['LIDAR'].QA;
   if (totalClassified === 0 && tasks.length > 0) {
@@ -624,7 +540,6 @@ function buildTeamBlock(group, idx) {
   const unit         = info ? (info.unit     || '—') : '—';
   const shiftType    = info ? (info.shift    || '—') : '—';
 
-  // Unique queues
   const queues = [...new Set(tasks.map(t => t.queueName).filter(Boolean))];
 
   const queueItems = queues.map(q =>
@@ -696,7 +611,6 @@ function renderOwnPanel(ownTasks) {
     return;
   }
 
-  // Breakdown by modality + pass with safe normalization
   const breakdown = { 'Lane Line': { FP: 0, QA: 0 }, 'LIDAR': { FP: 0, QA: 0 } };
   let totalObjects = 0;
 
@@ -704,14 +618,12 @@ function renderOwnPanel(ownTasks) {
     let mod  = String(t.modality || '').trim();
     let pass = String(t.pass || '').trim();
 
-    // Normalize modality: default to Lane Line if empty or unrecognized
     if (!mod || (mod.toLowerCase() !== 'lane line' && mod.toLowerCase() !== 'lidar')) {
       mod = 'Lane Line';
     }
     if (mod.toLowerCase() === 'lane line') mod = 'Lane Line';
     if (mod.toLowerCase() === 'lidar') mod = 'LIDAR';
 
-    // Normalize pass: default to FP, uppercase
     if (!pass) pass = 'FP';
     pass = pass.toUpperCase();
 
@@ -721,7 +633,6 @@ function renderOwnPanel(ownTasks) {
     totalObjects += Number(t.objectCount) || 0;
   });
 
-  // Safety net: if all counts are zero but we have tasks, force them to Lane Line/FP
   const totalClassified = breakdown['Lane Line'].FP + breakdown['Lane Line'].QA + 
                           breakdown['LIDAR'].FP + breakdown['LIDAR'].QA;
   if (totalClassified === 0 && ownTasks.length > 0) {
@@ -733,7 +644,6 @@ function renderOwnPanel(ownTasks) {
     breakdown['LIDAR'].FP,     breakdown['LIDAR'].QA, 1
   );
 
-  // Top queues
   const queueCounts = {};
   ownTasks.forEach(t => {
     const q = t.queueName;
@@ -815,12 +725,10 @@ function renderOwnPanel(ownTasks) {
 function applyFiltersAndRender() {
   let tasks = [...state.allTasks];
 
-  // Apply filters
   if (state.filterModality) tasks = tasks.filter(t => t.modality === state.filterModality);
   if (state.filterPass)     tasks = tasks.filter(t => t.pass     === state.filterPass);
   if (state.filterMode)     tasks = tasks.filter(t => t._mode    === state.filterMode);
 
-  // Sort
   tasks.sort((a, b) => {
     let valA = a[state.sortColumn];
     let valB = b[state.sortColumn];
@@ -832,7 +740,6 @@ function applyFiltersAndRender() {
       valA = Number(valA) || 0;
       valB = Number(valB) || 0;
     } else if (state.sortColumn === 'idx') {
-      // Keep original order
       valA = state.allTasks.indexOf(a);
       valB = state.allTasks.indexOf(b);
     } else {
@@ -858,14 +765,11 @@ function renderTable(tasks) {
     return;
   }
 
-  // Use requestAnimationFrame for smooth rendering
   requestAnimationFrame(() => {
-    // For large datasets, chunk rendering
     const html = tasks.map((task, i) => buildTableRow(task, i)).join('');
     tbody.innerHTML = html;
     DOM.rowCountInfo().textContent = `Showing ${tasks.length.toLocaleString()} task${tasks.length !== 1 ? 's' : ''}`;
 
-    // Update sort icons
     document.querySelectorAll('thead th[data-sort]').forEach(th => {
       th.classList.remove('sorted');
       const icon = th.querySelector('.sort-icon');
@@ -925,7 +829,6 @@ function buildTableRow(task, idx) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function initEventListeners() {
-  // Login
   DOM.btnLogin().addEventListener('click', handleLogin);
 
   DOM.inputName().addEventListener('keydown', e => {
@@ -936,15 +839,12 @@ function initEventListeners() {
     if (e.key === 'Enter') handleLogin();
   });
 
-  // Clear error on input
   [DOM.inputName(), DOM.inputPass()].forEach(el => {
     el.addEventListener('input', hideLoginError);
   });
 
-  // Logout
   DOM.btnLogout().addEventListener('click', handleLogout);
 
-  // Date select
   DOM.dateSelect().addEventListener('change', e => {
     const newDate = e.target.value;
     if (newDate && newDate !== state.currentDate) {
@@ -953,7 +853,6 @@ function initEventListeners() {
     }
   });
 
-  // Filters
   DOM.filterModality().addEventListener('change', e => {
     state.filterModality = e.target.value;
     applyFiltersAndRender();
@@ -969,7 +868,6 @@ function initEventListeners() {
     applyFiltersAndRender();
   });
 
-  // Table sort (header clicks)
   document.querySelectorAll('thead th[data-sort]').forEach(th => {
     th.addEventListener('click', () => {
       const col = th.dataset.sort;
@@ -985,11 +883,9 @@ function initEventListeners() {
 }
 
 function handleLogout() {
-  // Clear session
   sessionStorage.removeItem('slt_fullName');
   sessionStorage.removeItem('slt_displayName');
 
-  // Reset state
   state.fullName      = null;
   state.displayName   = null;
   state.currentDate   = null;
@@ -997,12 +893,10 @@ function handleLogout() {
   state.filteredTasks = [];
   state.fetchCache    = {};
 
-  // Clear inputs
   DOM.inputName().value = '';
   DOM.inputPass().value = '';
   hideLoginError();
 
-  // Switch screens
   DOM.dashboardScreen().classList.remove('active');
   DOM.loginScreen().style.display = '';
 
@@ -1035,11 +929,9 @@ function restoreSession() {
 document.addEventListener('DOMContentLoaded', () => {
   initEventListeners();
 
-  // Try to restore session; otherwise show login
   if (!restoreSession()) {
     DOM.loginScreen().style.display = '';
     DOM.dashboardScreen().classList.remove('active');
-    // Focus first input
     setTimeout(() => DOM.inputName().focus(), 100);
   }
 });

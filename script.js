@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════════════════════
    Senior Labelers Tracker — script.js
    Frontend Logic: Auth, Data Fetch, Rendering, Filtering, Sorting
-   Version: 1.0.0
+   Version: 1.0.1  (Parallel Fetch + Breakdown Fix)
    ═══════════════════════════════════════════════════════════════════════════════ */
 
 'use strict';
@@ -10,7 +10,7 @@
 const CONFIG = {
   SCRIPT_URL:    'https://script.google.com/macros/s/AKfycbwsrhMUOM3gV5QxuEtjWvDPV-EsAOXazI0DxTTBwYY3Q-Q44_bdLtPAxixGQq35rVo2qg/exec',
   APP_NAME:      'Senior Labelers Tracker',
-  VERSION:       '1.0.0',
+  VERSION:       '1.0.1',
   CACHE_TTL:     60 * 1000,          // 1 minute client-side cache
   MAX_LOGIN_ATTEMPTS: 5,
   LOCKOUT_SECONDS:    30,
@@ -392,22 +392,33 @@ async function showDashboard() {
   DOM.userNameNav().textContent  = state.displayName;
   DOM.dashboardGreeting().textContent = `${getGreeting()}, ${state.displayName}!`;
 
-  // Load available dates
-  setLoading(true, 'Loading your dates…');
+  // Load available dates + today's data IN PARALLEL
+  setLoading(true, 'Loading your data…');
   try {
-    const result = await apiAvailableDates(state.displayName);
-    const dates  = result.dates || [];
+    const today = todayKey();
+
+    // PARALLEL FETCH: dates list + today's user data simultaneously
+    const [datesResult, userDataResult] = await Promise.all([
+      apiAvailableDates(state.displayName),
+      apiUserData(state.displayName, today)
+    ]);
+
+    const dates = datesResult.dates || [];
     populateDateSelect(dates);
 
     // Default to today or first available
-    const today = todayKey();
     const selectedDate = dates.includes(today) ? today : (dates[0] || today);
     state.currentDate = selectedDate;
     DOM.dateSelect().value = selectedDate;
 
-    await loadDashboardData(selectedDate);
+    // If today is the selected date, render immediately from the already-fetched data
+    if (selectedDate === today) {
+      renderDashboardFromData(userDataResult, selectedDate);
+    } else {
+      await loadDashboardData(selectedDate);
+    }
   } catch (err) {
-    showToast('Failed to load dates: ' + err.message, 'error');
+    showToast('Failed to load data: ' + err.message, 'error');
     // Fallback: load today anyway
     state.currentDate = todayKey();
     await loadDashboardData(state.currentDate);
@@ -440,6 +451,36 @@ function populateDateSelect(dates) {
 }
 
 /**
+ * Render dashboard using already-fetched data (avoids duplicate API call).
+ */
+function renderDashboardFromData(result, date) {
+  const supportTasks = result.supportTasks || [];
+  const ownTasks     = result.ownTasks     || [];
+
+  // Tag each task with mode
+  supportTasks.forEach(t => { t._mode = 'SUPPORT'; });
+  ownTasks.forEach(t => { t._mode = 'OWN'; });
+
+  state.allTasks = [...supportTasks, ...ownTasks];
+
+  // Update last sync
+  if (result.lastSync) {
+    const syncTime = new Date(result.lastSync);
+    DOM.lastSyncText().textContent = 'Synced ' + syncTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  // Render everything
+  renderSummaryCards(supportTasks, ownTasks);
+  renderSupportPanel(supportTasks);
+  renderOwnPanel(ownTasks);
+
+  applyFiltersAndRender();
+
+  DOM.dashboardSubtitle().textContent =
+    `${state.allTasks.length} task${state.allTasks.length !== 1 ? 's' : ''} on ${date}`;
+}
+
+/**
  * Load and render dashboard data for a given date.
  */
 async function loadDashboardData(date) {
@@ -448,32 +489,7 @@ async function loadDashboardData(date) {
 
   try {
     const result = await apiUserData(state.displayName, date);
-
-    const supportTasks = result.supportTasks || [];
-    const ownTasks     = result.ownTasks     || [];
-
-    // Tag each task with mode
-    supportTasks.forEach(t => { t._mode = 'SUPPORT'; });
-    ownTasks.forEach(t => { t._mode = 'OWN'; });
-
-    state.allTasks = [...supportTasks, ...ownTasks];
-
-    // Update last sync
-    if (result.lastSync) {
-      const syncTime = new Date(result.lastSync);
-      DOM.lastSyncText().textContent = 'Synced ' + syncTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-    }
-
-    // Render everything
-    renderSummaryCards(supportTasks, ownTasks);
-    renderSupportPanel(supportTasks);
-    renderOwnPanel(ownTasks);
-
-    applyFiltersAndRender();
-
-    DOM.dashboardSubtitle().textContent =
-      `${state.allTasks.length} task${state.allTasks.length !== 1 ? 's' : ''} on ${date}`;
-
+    renderDashboardFromData(result, date);
   } catch (err) {
     showToast('Failed to load data: ' + err.message, 'error');
     DOM.dashboardSubtitle().textContent = 'Failed to load tasks.';
@@ -566,15 +582,37 @@ function buildTeamBlock(group, idx) {
   const info  = group.info;
   const tasks = group.tasks;
 
-  // Breakdown
+  // Breakdown with safe normalization — FIX for empty/whitespace/undefined values
   const breakdown = { 'Lane Line': { FP: 0, QA: 0 }, 'LIDAR': { FP: 0, QA: 0 } };
+
   tasks.forEach(t => {
-    const mod  = t.modality  || 'Lane Line';
-    const pass = t.pass      || 'FP';
+    let mod  = String(t.modality || '').trim();
+    let pass = String(t.pass || '').trim();
+
+    // Normalize modality: default to Lane Line if empty or unrecognized
+    if (!mod || (mod.toLowerCase() !== 'lane line' && mod.toLowerCase() !== 'lidar')) {
+      mod = 'Lane Line';
+    }
+    // Normalize case for display consistency
+    if (mod.toLowerCase() === 'lane line') mod = 'Lane Line';
+    if (mod.toLowerCase() === 'lidar') mod = 'LIDAR';
+
+    // Normalize pass: default to FP, uppercase
+    if (!pass) pass = 'FP';
+    pass = pass.toUpperCase();
+
     if (!breakdown[mod]) breakdown[mod] = { FP: 0, QA: 0 };
     if (pass === 'QA') breakdown[mod].QA++;
     else                breakdown[mod].FP++;
   });
+
+  // Safety net: if all counts are zero but we have tasks, force them to Lane Line/FP
+  // This handles edge cases where raw data might be malformed
+  const totalClassified = breakdown['Lane Line'].FP + breakdown['Lane Line'].QA + 
+                          breakdown['LIDAR'].FP + breakdown['LIDAR'].QA;
+  if (totalClassified === 0 && tasks.length > 0) {
+    breakdown['Lane Line'].FP = tasks.length;
+  }
 
   const maxCount = Math.max(
     breakdown['Lane Line'].FP, breakdown['Lane Line'].QA,
@@ -658,18 +696,37 @@ function renderOwnPanel(ownTasks) {
     return;
   }
 
-  // Breakdown by modality + pass
+  // Breakdown by modality + pass with safe normalization
   const breakdown = { 'Lane Line': { FP: 0, QA: 0 }, 'LIDAR': { FP: 0, QA: 0 } };
   let totalObjects = 0;
 
   ownTasks.forEach(t => {
-    const mod  = t.modality || 'Lane Line';
-    const pass = t.pass     || 'FP';
+    let mod  = String(t.modality || '').trim();
+    let pass = String(t.pass || '').trim();
+
+    // Normalize modality: default to Lane Line if empty or unrecognized
+    if (!mod || (mod.toLowerCase() !== 'lane line' && mod.toLowerCase() !== 'lidar')) {
+      mod = 'Lane Line';
+    }
+    if (mod.toLowerCase() === 'lane line') mod = 'Lane Line';
+    if (mod.toLowerCase() === 'lidar') mod = 'LIDAR';
+
+    // Normalize pass: default to FP, uppercase
+    if (!pass) pass = 'FP';
+    pass = pass.toUpperCase();
+
     if (!breakdown[mod]) breakdown[mod] = { FP: 0, QA: 0 };
     if (pass === 'QA') breakdown[mod].QA++;
     else                breakdown[mod].FP++;
     totalObjects += Number(t.objectCount) || 0;
   });
+
+  // Safety net: if all counts are zero but we have tasks, force them to Lane Line/FP
+  const totalClassified = breakdown['Lane Line'].FP + breakdown['Lane Line'].QA + 
+                          breakdown['LIDAR'].FP + breakdown['LIDAR'].QA;
+  if (totalClassified === 0 && ownTasks.length > 0) {
+    breakdown['Lane Line'].FP = ownTasks.length;
+  }
 
   const maxCount = Math.max(
     breakdown['Lane Line'].FP, breakdown['Lane Line'].QA,
